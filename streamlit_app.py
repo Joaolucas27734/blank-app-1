@@ -1,111 +1,114 @@
-# app.py
 import streamlit as st
 import pandas as pd
-from kpi import load_data, kpi_report, kpis_to_dataframe
-import plotly.express as px
-import io
+import altair as alt
 
-st.set_page_config(layout="wide", page_title="Dropshipping Logistics KPIs")
+# ------------------------------
+# CONFIG
+# ------------------------------
+st.set_page_config(
+    page_title="Dashboard Logístico",
+    layout="wide",
+)
 
-st.title("Dropshipping Logistics — KPI Analyzer")
+st.title("📦 Dashboard de Logística – FlexLive Dropshipping")
 
-st.markdown("""
-Faça upload do CSV com os dados de pedidos (veja `sample_data.csv` no repo para o esquema). 
-Se seus nomes de colunas forem diferentes, use o mapeamento abaixo.
-""")
+# ------------------------------
+# IMPORTAÇÃO DO GOOGLE SHEETS
+# ------------------------------
+sheet_url = "https://docs.google.com/spreadsheets/d/1WTEiRnm1OFxzn6ag1MfI8VnlQCbL8xwxY3LeanCsdxk/gviz/tq?tqx=out:csv"
+df = pd.read_csv(sheet_url)
 
-uploaded = st.file_uploader("Upload CSV", type=["csv"])
-use_sample = st.checkbox("Usar sample_data.csv de exemplo (se estiver no mesmo diretório)", value=False)
+st.success("Dados carregados direto do Google Sheets!")
 
-# column remapping UI
-st.subheader("Mapeamento de colunas (opcional)")
-default_map = {
-    "order_id":"order_id",
-    "order_date":"order_date",
-    "supplier_post_date":"supplier_post_date",
-    "tracking_first_update":"tracking_first_update",
-    "delivery_date":"delivery_date",
-    "carrier":"carrier",
-    "carrier_attempts":"carrier_attempts",
-    "status":"status",
-    "product_cost":"product_cost",
-    "shipping_cost":"shipping_cost",
-    "refund_amount":"refund_amount",
-    "is_returned":"is_returned",
-    "is_lost":"is_lost",
-    "customs_retained":"customs_retained",
-    "packaging_quality_score":"packaging_quality_score",
-    "contacts_count":"contacts_count"
-}
-col_map = {}
-cols_ui = st.columns(2)
-i = 0
-for k,v in default_map.items():
-    with cols_ui[i%2]:
-        col_map[k] = st.text_input(f"{k}", value=v)
-    i += 1
-
-df = None
-if uploaded is not None:
-    df = pd.read_csv(uploaded)
-elif use_sample:
+# ------------------------------
+# TRATAMENTO DE DADOS
+# ------------------------------
+# Converte datas automaticamente
+for col in df.columns:
     try:
-        df = pd.read_csv("sample_data.csv")
-    except Exception as e:
-        st.error(f"Não foi possível carregar sample_data.csv: {e}")
+        df[col] = pd.to_datetime(df[col])
+    except:
+        pass
 
-if df is not None:
-    st.success(f"Dados carregados: {df.shape[0]} linhas × {df.shape[1]} colunas")
-    # rename according to mapping
-    rename_map = {v:k for k,v in col_map.items() if v in df.columns}
-    if rename_map:
-        df = df.rename(columns=rename_map)
-    # apply loader for types
-    df = load_data(df)
-    st.dataframe(df.head(200))
+# ------------------------------
+# SIDEBAR – FILTRO
+# ------------------------------
+st.sidebar.header("Filtros")
 
-    # KPI calc
-    promised_days = st.number_input("Promised delivery days (SLA)", value=30, min_value=1)
-    report = kpi_report(df, promised_days=int(promised_days))
-    kpi_df = kpis_to_dataframe(report)
-    st.header("KPIs calculadas")
-    st.table(kpi_df.T.rename(columns={0:"value"}).reset_index().rename(columns={"index":"kpi"}))
+if "status" in df.columns:
+    filtro_status = st.sidebar.multiselect(
+        "Status do pedido",
+        df["status"].dropna().unique(),
+        default=df["status"].dropna().unique()
+    )
+    df = df[df["status"].isin(filtro_status)]
 
-    # Charts
-    st.subheader("Visualizações rápidas")
-    # Delivery time distribution
-    if 'delivery_date' in df.columns and 'order_date' in df.columns:
-        mask = df['delivery_date'].notna() & df['order_date'].notna()
-        if mask.sum()>0:
-            df['days_to_delivery'] = (df['delivery_date'] - df['order_date']).dt.days
-            fig = px.histogram(df.loc[mask], x='days_to_delivery', nbins=30, title='Distribuição do tempo até entrega (dias)')
-            st.plotly_chart(fig, use_container_width=True)
+# ------------------------------
+# KPIs
+# ------------------------------
+col1, col2, col3 = st.columns(3)
 
-    # Transit time
-    if 'supplier_post_date' in df.columns and 'tracking_first_update' in df.columns:
-        mask2 = df['supplier_post_date'].notna() & df['tracking_first_update'].notna()
-        if mask2.sum()>0:
-            df['international_transit'] = (df['tracking_first_update'] - df['supplier_post_date']).dt.days
-            fig2 = px.box(df.loc[mask2], y='international_transit', title='Transit time internacional (dias) — boxplot')
-            st.plotly_chart(fig2, use_container_width=True)
+# KPI 1 – Total de Pedidos
+total_pedidos = len(df)
+col1.metric("📦 Total de Pedidos", total_pedidos)
 
-    # Packaging quality
-    if 'packaging_quality_score' in df.columns:
-        fig3 = px.histogram(df, x='packaging_quality_score', nbins=5, title='Quality score da embalagem')
-        st.plotly_chart(fig3, use_container_width=True)
+# KPI 2 – Pedidos Enviados
+if "status" in df.columns:
+    enviados = df[df["status"].str.contains("enviado", case=False, na=False)]
+    col2.metric("🚚 Pedidos Enviados", len(enviados))
 
-    # Export KPIs
-    st.subheader("Exportar KPIs")
-    buf = io.BytesIO()
-    kpi_df.to_csv(buf, index=False)
-    b = buf.getvalue()
-    st.download_button("Baixar KPIs CSV", data=b, file_name="kpis_summary.csv", mime="text/csv")
+# KPI 3 – Tempo Médio (Dias)
+if "data_envio" in df.columns and "data_compra" in df.columns:
+    df["lead_time"] = (df["data_envio"] - df["data_compra"]).dt.days
+    tempo_medio = round(df["lead_time"].mean(), 2)
+    col3.metric("⏱ Tempo Médio de Processamento", tempo_medio)
 
-    # Save cleaned dataset
-    st.subheader("Exportar dados limpos")
-    buf2 = io.BytesIO()
-    df.to_csv(buf2, index=False)
-    st.download_button("Baixar dados limpos", data=buf2.getvalue(), file_name="cleaned_data.csv", mime="text/csv")
+# ------------------------------
+# GRÁFICOS
+# ------------------------------
+st.header("📊 Visualizações")
 
-else:
-    st.info("Faça upload do CSV ou marque 'Usar sample_data.csv' para testar.")
+# Gráfico de Pedidos por Dia
+if "data_compra" in df.columns:
+    pedidos_por_dia = df.groupby(df["data_compra"].dt.date).size().reset_index(name="Quantidade")
+
+    chart = alt.Chart(pedidos_por_dia).mark_line(point=True).encode(
+        x="data_compra:T",
+        y="Quantidade:Q",
+        tooltip=["data_compra", "Quantidade"]
+    ).properties(width="100%", height=350)
+
+    st.subheader("📈 Pedidos por Dia")
+    st.altair_chart(chart, use_container_width=True)
+
+# Gráfico de Status
+if "status" in df.columns:
+    status_count = df["status"].value_counts().reset_index()
+    status_count.columns = ["Status", "Quantidade"]
+
+    chart2 = alt.Chart(status_count).mark_bar().encode(
+        x="Status:N",
+        y="Quantidade:Q",
+        tooltip=["Status", "Quantidade"],
+        color="Status:N"
+    ).properties(width="100%", height=350)
+
+    st.subheader("📊 Distribuição de Status")
+    st.altair_chart(chart2, use_container_width=True)
+
+# ------------------------------
+# TABELA COMPLETA
+# ------------------------------
+st.header("📄 Dados Completos")
+st.dataframe(df, use_container_width=True)
+
+# ------------------------------
+# DOWNLOAD DO CSV
+# ------------------------------
+csv = df.to_csv(index=False).encode("utf-8")
+st.download_button(
+    label="📥 Baixar CSV Filtrado",
+    data=csv,
+    file_name="dados_logistica.csv",
+    mime="text/csv",
+)
