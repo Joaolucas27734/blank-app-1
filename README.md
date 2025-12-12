@@ -1,19 +1,16 @@
-# 🎈 Blank app template
+# Dropshipping Logistics KPIs — Analyzer (Streamlit)
 
-A simple Streamlit app template for you to modify!
+Repositório com código pronto para calcular e visualizar KPIs logísticos para operações dropshipping (China→Brasil).
 
-[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://blank-app-template.streamlit.app/)
+## Requisitos
+- Python 3.9+
+- pip
 
-### How to run it on your own machine
-
-1. Install the requirements
-
-   ```
-   $ pip install -r requirements.txt
-   ```
-
-2. Run the app
-
-   ```
-   $ streamlit run streamlit_app.py
-   ```
+## Instalação
+```bash
+git clone <repo-url>
+cd logistics-kpis
+python -m venv .venv
+source .venv/bin/activate  # Linux/Mac
+.venv\Scripts\activate     # Windows
+pip install -r requirements.txt
